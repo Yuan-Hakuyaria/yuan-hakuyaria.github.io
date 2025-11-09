@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式粒子黑洞 3D 效果（优化版）</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            z-index: 100;
+        }
+        #configBtn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 200;
+            backdrop-filter: blur(10px);
+            transition: background 0.3s;
+        }
+        #configBtn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 300;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background-color: #1a1a1a;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #333;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 400px;
+            color: white;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        .modal-content h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #ff4500;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background: #2a2a2a;
+            color: white;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #ff4500;
+        }
+        .modal-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        .btn-apply {
+            background: #ff4500;
+            color: white;
+        }
+        .btn-apply:hover {
+            background: #ff6347;
+        }
+        .btn-close {
+            background: #555;
+            color: white;
+        }
+        .btn-close:hover {
+            background: #666;
+        }
+        @media (max-width: 600px) {
+            .modal-content {
+                width: 95%;
+                margin: 10% auto;
+                padding: 15px;
+            }
+            .modal-buttons {
+                flex-direction: column;
+            }
+            .btn {
+                margin-bottom: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="info">拖动鼠标旋转视角 | 点击屏幕生成新粒子</div>
+    <button id="configBtn">⚙️</button>
+    <div id="configPanel" class="modal">
+        <div class="modal-content">
+            <h2>黑洞配置</h2>
+            <form id="configForm">
+                <div class="form-group">
+                    <label for="growthSize">黑洞每级增长大小 (默认1 → 实际+0.1):</label>
+                    <input type="number" id="growthSize" placeholder="1" min="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="gravityInc">每级吸引力增加 (默认1 → 实际+0.01):</label>
+                    <input type="number" id="gravityInc" placeholder="1" min="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="initialCount">初始粒子数量 (默认5000):</label>
+                    <input type="number" id="initialCount" placeholder="5000" min="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="pushForce">白色粒子推力 (默认1):</label>
+                    <input type="number" id="pushForce" placeholder="1" min="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="growthNum">白色粒子数量 (默认200):</label>
+                    <input type="number" id="growthNum" placeholder="200" min="0" step="1">
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn btn-close" onclick="closeConfig()">关闭</button>
+                    <button type="button" class="btn btn-apply" onclick="applyConfig()">应用</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        // 默认配置
+        let config = {
+            growthSize: 1, // 实际 growthIncrement = this / 10
+            gravityInc: 1, // 实际 gravityStrength += this / 100
+            initialParticleCount: 5000,
+            pushForce: 1,
+            growthNum: 200
+        };
+
+        // 自定义粒子数量（可修改）
+        let initialParticleCount = config.initialParticleCount;
+        const clickParticleCount = 5; // 每次点击生成粒子数
+        // 初始化 Three.js 场景
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        // 添加轨道控制（拖动视角）
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        // 背景星星系统
+        const starCount = 2000;
+        const starGeometry = new THREE.BufferGeometry();
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const radius = 200 + Math.random() * 300;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+            starPositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+            starPositions[i * 3 + 2] = radius * Math.cos(phi);
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+        // 环绕粒子系统（模拟吸积盘环绕粒子）
+        let orbitCount = 2000;
+        const orbitGeometry = new THREE.BufferGeometry();
+        let orbitPositions = new Float32Array(orbitCount * 3);
+        let orbitAngles = new Float32Array(orbitCount); // 初始角度
+        let orbitRadii = new Float32Array(orbitCount); // 当前半径
+        let targetOrbitRadii = new Float32Array(orbitCount); // 目标半径，用于过渡
+        let orbitColors = new Float32Array(orbitCount * 3);
+        let orbitTransitionActive = false;
+        let orbitTransitionStartTime = 0;
+        let blackHoleRadius = 4; // 移到这里，便于初始使用
+        for (let i = 0; i < orbitCount; i++) {
+            const radius = blackHoleRadius + 5 + Math.random() * 15; // 初始环绕半径，适配黑洞半径
+            const theta = Math.random() * Math.PI * 2;
+            orbitRadii[i] = radius;
+            targetOrbitRadii[i] = radius;
+            orbitAngles[i] = theta;
+            orbitPositions[i * 3] = radius * Math.cos(theta);
+            orbitPositions[i * 3 + 1] = 0; // 在XZ平面
+            orbitPositions[i * 3 + 2] = radius * Math.sin(theta);
+            // 橙黄色调
+            const color = new THREE.Color().setHSL(0.1, 0.8, 0.5 + Math.random() * 0.3);
+            orbitColors[i * 3] = color.r;
+            orbitColors[i * 3 + 1] = color.g;
+            orbitColors[i * 3 + 2] = color.b;
+        }
+        orbitGeometry.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+        orbitGeometry.setAttribute('color', new THREE.BufferAttribute(orbitColors, 3));
+        const orbitMaterial = new THREE.PointsMaterial({
+            size: 0.8,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.9,
+            blending: THREE.AdditiveBlending
+        });
+        const orbitSystem = new THREE.Points(orbitGeometry, orbitMaterial);
+        scene.add(orbitSystem);
+        // 甩飞粒子系统（当环绕粒子密集时触发）
+        let ejectAnimationActive = false;
+        let ejectTimer = 0;
+        let ejectParticles = null;
+        let ejectVelocities = null;
+        let ejectMaterial = null;
+        let ejectCount = 0; // 甩飞粒子数量
+        function startEjectAnimation() {
+            if (ejectAnimationActive) return;
+            ejectAnimationActive = true;
+            ejectTimer = 0;
+            // 计算甩飞数量：40% of current orbitCount
+            ejectCount = Math.floor(orbitCount * 0.4);
+            // 从orbit系统中移除40%粒子（随机选择）
+            const keepIndices = [];
+            const ejectIndices = [];
+            for (let i = 0; i < orbitCount; i++) {
+                if (Math.random() < 0.4) {
+                    ejectIndices.push(i);
+                } else {
+                    keepIndices.push(i);
+                }
+            }
+            // 重建orbit系统（保留粒子）
+            const newOrbitCount = orbitCount - ejectCount;
+            const newOrbitPositions = new Float32Array(newOrbitCount * 3);
+            const newOrbitAngles = new Float32Array(newOrbitCount);
+            const newOrbitRadii = new Float32Array(newOrbitCount);
+            const newTargetOrbitRadii = new Float32Array(newOrbitCount);
+            const newOrbitColors = new Float32Array(newOrbitCount * 3);
+            let keepIdx = 0;
+            for (let i of keepIndices) {
+                newOrbitPositions[keepIdx * 3] = orbitPositions[i * 3];
+                newOrbitPositions[keepIdx * 3 + 1] = orbitPositions[i * 3 + 1];
+                newOrbitPositions[keepIdx * 3 + 2] = orbitPositions[i * 3 + 2];
+                newOrbitAngles[keepIdx] = orbitAngles[i];
+                newOrbitRadii[keepIdx] = orbitRadii[i];
+                newTargetOrbitRadii[keepIdx] = targetOrbitRadii[i];
+                newOrbitColors[keepIdx * 3] = orbitColors[i * 3];
+                newOrbitColors[keepIdx * 3 + 1] = orbitColors[i * 3 + 1];
+                newOrbitColors[keepIdx * 3 + 2] = orbitColors[i * 3 + 2];
+                keepIdx++;
+            }
+            orbitCount = newOrbitCount;
+            orbitPositions = newOrbitPositions;
+            orbitAngles = newOrbitAngles;
+            orbitRadii = newOrbitRadii;
+            targetOrbitRadii = newTargetOrbitRadii;
+            orbitColors = newOrbitColors;
+            orbitGeometry.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+            orbitGeometry.setAttribute('color', new THREE.BufferAttribute(orbitColors, 3));
+            orbitSystem.geometry.attributes.position.needsUpdate = true;
+            orbitSystem.geometry.attributes.color.needsUpdate = true;
+            // 创建甩飞粒子
+            const ejectGeometry = new THREE.BufferGeometry();
+            const ejectPositions = new Float32Array(ejectCount * 3);
+            const ejectColors = new Float32Array(ejectCount * 3);
+            ejectVelocities = new Float32Array(ejectCount * 3);
+            let ejectIdx = 0;
+            for (let i of ejectIndices) {
+                // 初始位置从orbit位置开始
+                ejectPositions[ejectIdx * 3] = orbitPositions[i * 3];
+                ejectPositions[ejectIdx * 3 + 1] = orbitPositions[i * 3 + 1];
+                ejectPositions[ejectIdx * 3 + 2] = orbitPositions[i * 3 + 2];
+                // 颜色保持原orbit颜色
+                ejectColors[ejectIdx * 3] = orbitColors[i * 3];
+                ejectColors[ejectIdx * 3 + 1] = orbitColors[i * 3 + 1];
+                ejectColors[ejectIdx * 3 + 2] = orbitColors[i * 3 + 2];
+                // 快速向外速度（随机方向，但偏向外）
+                const speed = 2.0 + Math.random() * 1.0;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                ejectVelocities[ejectIdx * 3] = speed * Math.sin(phi) * Math.cos(theta);
+                ejectVelocities[ejectIdx * 3 + 1] = speed * Math.sin(phi) * Math.sin(theta);
+                ejectVelocities[ejectIdx * 3 + 2] = speed * Math.cos(phi);
+                ejectIdx++;
+            }
+            ejectGeometry.setAttribute('position', new THREE.BufferAttribute(ejectPositions, 3));
+            ejectGeometry.setAttribute('color', new THREE.BufferAttribute(ejectColors, 3));
+            ejectMaterial = new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 1.0,
+                blending: THREE.AdditiveBlending
+            });
+            ejectParticles = new THREE.Points(ejectGeometry, ejectMaterial);
+            scene.add(ejectParticles);
+        }
+        // 检查密集度并触发甩飞
+        function checkAndEjectIfDense() {
+            const densityThreshold = 3000; // 当超过3000时触发
+            if (orbitCount > densityThreshold && !ejectAnimationActive) {
+                startEjectAnimation();
+            }
+        }
+        // 添加到环绕系统函数
+        function addToOrbit() {
+            orbitCount++;
+            const newOrbitPositions = new Float32Array(orbitCount * 3);
+            const newOrbitAngles = new Float32Array(orbitCount);
+            const newOrbitRadii = new Float32Array(orbitCount);
+            const newTargetOrbitRadii = new Float32Array(orbitCount);
+            const newOrbitColors = new Float32Array(orbitCount * 3);
+            newOrbitPositions.set(orbitPositions);
+            newOrbitAngles.set(orbitAngles);
+            newOrbitRadii.set(orbitRadii);
+            newTargetOrbitRadii.set(targetOrbitRadii);
+            newOrbitColors.set(orbitColors);
+            // 新粒子：随机半径在黑洞外（随黑洞大小调整）
+            const newRadius = blackHoleRadius + 5 + Math.random() * 10;
+            const newTheta = Math.random() * Math.PI * 2;
+            newOrbitRadii[orbitCount - 1] = newRadius;
+            newTargetOrbitRadii[orbitCount - 1] = newRadius;
+            newOrbitAngles[orbitCount - 1] = newTheta;
+            newOrbitPositions[(orbitCount - 1) * 3] = newRadius * Math.cos(newTheta);
+            newOrbitPositions[(orbitCount - 1) * 3 + 1] = 0;
+            newOrbitPositions[(orbitCount - 1) * 3 + 2] = newRadius * Math.sin(newTheta);
+            const newColor = new THREE.Color().setHSL(0.1, 0.8, 0.5 + Math.random() * 0.3);
+            newOrbitColors[(orbitCount - 1) * 3] = newColor.r;
+            newOrbitColors[(orbitCount - 1) * 3 + 1] = newColor.g;
+            newOrbitColors[(orbitCount - 1) * 3 + 2] = newColor.b;
+            orbitPositions = newOrbitPositions;
+            orbitAngles = newOrbitAngles;
+            orbitRadii = newOrbitRadii;
+            targetOrbitRadii = newTargetOrbitRadii;
+            orbitColors = newOrbitColors;
+            orbitGeometry.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+            orbitGeometry.setAttribute('color', new THREE.BufferAttribute(orbitColors, 3));
+            orbitSystem.geometry.attributes.position.needsUpdate = true;
+            orbitSystem.geometry.attributes.color.needsUpdate = true;
+        }
+        // 更新环绕粒子目标半径（保持相对偏移）
+        function updateOrbitTargets(currentBlackRadius, targetBlackRadius) {
+            for (let i = 0; i < orbitCount; i++) {
+                targetOrbitRadii[i] = targetBlackRadius + (orbitRadii[i] - currentBlackRadius);
+            }
+            orbitTransitionActive = true;
+            orbitTransitionStartTime = Date.now();
+        }
+        // 初始化吸引粒子系统
+        function initParticles(count) {
+            particleCount = count;
+            positions = new Float32Array(particleCount * 3);
+            velocities = new Float32Array(particleCount * 3);
+            colors = new Float32Array(particleCount * 3);
+            sizes = new Float32Array(particleCount);
+            particles.dispose();
+            particles = new THREE.BufferGeometry();
+            // 初始化吸引粒子（加快初始随机速度）
+            for (let i = 0; i < particleCount; i++) {
+                const radius = 80 + Math.random() * 150;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                positions[i * 3 + 2] = radius * Math.cos(phi);
+                // 加快初始随机速度
+                velocities[i * 3] = (Math.random() - 0.5) * 0.45;
+                velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.45;
+                velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.45;
+                const color = new THREE.Color().setHSL(0.6, 0.8, 0.5 + Math.random() * 0.3);
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+                sizes[i] = 0.3 + Math.random() * 0.4;
+            }
+            particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            particleSystem.geometry.dispose();
+            particleSystem.geometry = particles;
+        }
+        // 吸引粒子系统
+        let particleCount = initialParticleCount; // 使用自定义初始数
+        let positions = new Float32Array(particleCount * 3);
+        let velocities = new Float32Array(particleCount * 3);
+        let colors = new Float32Array(particleCount * 3);
+        let sizes = new Float32Array(particleCount);
+        let particles = new THREE.BufferGeometry();
+        // 初始化吸引粒子（加快初始随机速度）
+        for (let i = 0; i < particleCount; i++) {
+            const radius = 80 + Math.random() * 150;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+            positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+            positions[i * 3 + 2] = radius * Math.cos(phi);
+            // 加快初始随机速度
+            velocities[i * 3] = (Math.random() - 0.5) * 0.45;
+            velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.45;
+            velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.45;
+            const color = new THREE.Color().setHSL(0.6, 0.8, 0.5 + Math.random() * 0.3);
+            colors[i * 3] = color.r;
+            colors[i * 3 + 1] = color.g;
+            colors[i * 3 + 2] = color.b;
+            sizes[i] = 0.3 + Math.random() * 0.4;
+        }
+        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        const particleMaterial = new THREE.PointsMaterial({
+            size: 1.0,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.9,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true
+        });
+        const particleSystem = new THREE.Points(particles, particleMaterial);
+        scene.add(particleSystem);
+        // 吸积盘（增强环绕效果，随黑洞大小调整）
+        let innerRingRadius = blackHoleRadius + 1;
+        let outerRingRadius = blackHoleRadius + 20;
+        let targetInnerRingRadius = innerRingRadius;
+        let targetOuterRingRadius = outerRingRadius;
+        let ringTransitionActive = false;
+        let ringTransitionStartTime = 0;
+        const diskGeometry = new THREE.RingGeometry(innerRingRadius, outerRingRadius, 64);
+        const diskMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff4500,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.7,
+            blending: THREE.AdditiveBlending
+        });
+        const accretionDisk = new THREE.Mesh(diskGeometry, diskMaterial);
+        accretionDisk.rotation.x = Math.PI / 2;
+        scene.add(accretionDisk);
+        // 更新光环目标大小（过渡）
+        function updateAccretionDiskTarget(targetBlackRadius) {
+            targetInnerRingRadius = targetBlackRadius + 1;
+            targetOuterRingRadius = targetBlackRadius + 20;
+            ringTransitionActive = true;
+            ringTransitionStartTime = Date.now();
+        }
+        // 黑洞事件视界
+        let targetBlackHoleRadius = blackHoleRadius;
+        let blackHoleTransitionActive = false;
+        let blackHoleTransitionStartTime = 0;
+        const blackHoleGeometry = new THREE.SphereGeometry(blackHoleRadius, 32, 32);
+        const blackHoleMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const blackHole = new THREE.Mesh(blackHoleGeometry, blackHoleMaterial);
+        scene.add(blackHole);
+        // 黑洞成长函数（固定增量0.1）
+        let growthIncrement = config.growthSize * 0.1; // 基于配置
+        function growBlackHole() {
+            const oldRadius = blackHoleRadius;
+            targetBlackHoleRadius = blackHoleRadius + growthIncrement;
+            gravityStrength += config.gravityInc * 0.01; // 基于配置
+            blackHoleTransitionActive = true;
+            blackHoleTransitionStartTime = Date.now();
+            updateAccretionDiskTarget(targetBlackHoleRadius); // 更新光环目标，使用目标半径
+            updateOrbitTargets(oldRadius, targetBlackHoleRadius); // 更新粒子目标比例，保持偏移
+            addToOrbit(); // 添加一个到光环
+            startGrowthAnimation(); // 启动动画
+        }
+        // 成长动画：从中心向外放射白色粒子，持续10秒渐隐
+        let growthAnimationActive = false;
+        let growthTimer = 0;
+        let growthParticles = null;
+        let growthVelocities = null;
+        let growthMaterial = null;
+        let growthPositionsArray = []; // 保存白色粒子位置用于推动计算
+        let growthCount = config.growthNum; // 基于配置
+        function startGrowthAnimation() {
+            if (growthAnimationActive) return;
+            growthAnimationActive = true;
+            growthTimer = 0;
+            growthPositionsArray = []; // 重置
+            // 白色粒子数量基于配置
+            const count = config.growthNum;
+            const growthGeometry = new THREE.BufferGeometry();
+            const growthPositions = new Float32Array(count * 3);
+            const growthColors = new Float32Array(count * 3);
+            growthVelocities = new Float32Array(count * 3); // 速度
+            for (let i = 0; i < count; i++) {
+                // 初始位置在中心，小随机偏移
+                growthPositions[i * 3] = (Math.random() - 0.5) * 0.5;
+                growthPositions[i * 3 + 1] = (Math.random() - 0.5) * 0.5;
+                growthPositions[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+                growthPositionsArray.push(new THREE.Vector3(growthPositions[i * 3], growthPositions[i * 3 + 1], growthPositions[i * 3 + 2]));
+                // 白色
+                growthColors[i * 3] = 1;
+                growthColors[i * 3 + 1] = 1;
+                growthColors[i * 3 + 2] = 1;
+                // 快速向外速度
+                const speed = 1.5; // 更快
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                growthVelocities[i * 3] = speed * Math.sin(phi) * Math.cos(theta);
+                growthVelocities[i * 3 + 1] = speed * Math.sin(phi) * Math.sin(theta);
+                growthVelocities[i * 3 + 2] = speed * Math.cos(phi);
+            }
+            growthGeometry.setAttribute('position', new THREE.BufferAttribute(growthPositions, 3));
+            growthGeometry.setAttribute('color', new THREE.BufferAttribute(growthColors, 3));
+            growthMaterial = new THREE.PointsMaterial({
+                size: 0.5,
+                vertexColors: true,
+                transparent: true,
+                opacity: 1.0,
+                blending: THREE.AdditiveBlending
+            });
+            growthParticles = new THREE.Points(growthGeometry, growthMaterial);
+            scene.add(growthParticles);
+        }
+        let gravityStrength = 0.1;
+        let absorbedCount = 0;
+        let currentTarget = 10; // 初始目标10
+        let absorbedSinceLastUpgrade = 0;
+        let pushFrameCounter = 0; // 推动帧计数器，每5帧执行一次（增强推力）
+        let pushForce = config.pushForce * 1.0; // 基于配置
+        camera.position.z = 150;
+        let time = 0;
+        let mouse = new THREE.Vector2();
+        // 点击生成粒子
+        const raycaster = new THREE.Raycaster();
+        const generateParticleAtClick = (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            // 生成新粒子（距离相机不同单位处，避免重叠）
+            const dir = raycaster.ray.direction.clone();
+            for (let k = 0; k < clickParticleCount; k++) {
+                const scalar = 80 + (k * 20); // 不同距离：80,100,120,...
+                const newPos = new THREE.Vector3().copy(camera.position).add(dir.multiplyScalar(scalar));
+                // 添加单个粒子
+                particleCount++;
+                const newPositions = new Float32Array(particleCount * 3);
+                const newVelocities = new Float32Array(particleCount * 3);
+                const newColors = new Float32Array(particleCount * 3);
+                const newSizes = new Float32Array(particleCount);
+                // 复制旧数据
+                newPositions.set(positions);
+                newVelocities.set(velocities);
+                newColors.set(colors);
+                newSizes.set(sizes);
+                // 新粒子数据
+                const idx = (particleCount - 1) * 3;
+                newPositions[idx] = newPos.x;
+                newPositions[idx + 1] = newPos.y;
+                newPositions[idx + 2] = newPos.z;
+                // 加快初始随机速度
+                newVelocities[idx] = (Math.random() - 0.5) * 0.45;
+                newVelocities[idx + 1] = (Math.random() - 0.5) * 0.45;
+                newVelocities[idx + 2] = (Math.random() - 0.5) * 0.45;
+                const newColor = new THREE.Color().setHSL(0.6, 0.8, 0.5 + Math.random() * 0.3);
+                newColors[idx] = newColor.r;
+                newColors[idx + 1] = newColor.g;
+                newColors[idx + 2] = newColor.b;
+                newSizes[particleCount - 1] = 0.3 + Math.random() * 0.4;
+                // 更新变量
+                positions = newPositions;
+                velocities = newVelocities;
+                colors = newColors;
+                sizes = newSizes;
+                // 更新几何体属性
+                particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+                particleSystem.geometry.attributes.position.needsUpdate = true;
+                particleSystem.geometry.attributes.color.needsUpdate = true;
+                particleSystem.geometry.attributes.size.needsUpdate = true;
+            }
+        };
+        renderer.domElement.addEventListener('click', generateParticleAtClick);
+        // 配置面板函数
+        function openConfig() {
+            document.getElementById('configPanel').style.display = 'block';
+            // 设置placeholder为当前值
+            document.getElementById('growthSize').placeholder = config.growthSize;
+            document.getElementById('gravityInc').placeholder = config.gravityInc;
+            document.getElementById('initialCount').placeholder = config.initialParticleCount;
+            document.getElementById('pushForce').placeholder = config.pushForce;
+            document.getElementById('growthNum').placeholder = config.growthNum;
+        }
+        function closeConfig() {
+            document.getElementById('configPanel').style.display = 'none';
+        }
+        function applyConfig() {
+            const growthSize = parseInt(document.getElementById('growthSize').value) || config.growthSize;
+            const gravityInc = parseInt(document.getElementById('gravityInc').value) || config.gravityInc;
+            const initialCount = parseInt(document.getElementById('initialCount').value) || config.initialParticleCount;
+            const pushForceVal = parseInt(document.getElementById('pushForce').value) || config.pushForce;
+            const growthNum = parseInt(document.getElementById('growthNum').value) || config.growthNum;
+            if (growthSize < 0 || gravityInc < 0 || initialCount < 0 || pushForceVal < 0 || growthNum < 0) {
+                alert('所有值必须大于等于0的整数！');
+                return;
+            }
+            if (isNaN(growthSize) || isNaN(gravityInc) || isNaN(initialCount) || isNaN(pushForceVal) || isNaN(growthNum)) {
+                alert('请输入有效的数字！');
+                return;
+            }
+            // 更新配置
+            config = { growthSize, gravityInc, initialParticleCount: initialCount, pushForce: pushForceVal, growthNum };
+            growthIncrement = config.growthSize * 0.1;
+            pushForce = config.pushForce * 1.0;
+            growthCount = config.growthNum;
+            // 重新初始化粒子
+            initParticles(config.initialParticleCount);
+            // 重置其他状态
+            absorbedSinceLastUpgrade = 0;
+            currentTarget = 10;
+            absorbedCount = 0;
+            gravityStrength = 0.1;
+            closeConfig();
+            alert('配置已应用并重新加载粒子！');
+        }
+        document.getElementById('configBtn').addEventListener('click', openConfig);
+        window.addEventListener('click', (event) => {
+            const panel = document.getElementById('configPanel');
+            if (event.target === panel) {
+                closeConfig();
+            }
+        });
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+            // 检查环绕粒子密集度
+            checkAndEjectIfDense();
+            // 更新甩飞动画（10秒渐隐）
+            if (ejectAnimationActive) {
+                ejectTimer++;
+                const posAttr = ejectParticles.geometry.getAttribute('position');
+                for (let i = 0; i < ejectCount; i++) {
+                    let x = posAttr.getX(i);
+                    let y = posAttr.getY(i);
+                    let z = posAttr.getZ(i);
+                    x += ejectVelocities[i * 3] * 0.4; // 快速飞走
+                    y += ejectVelocities[i * 3 + 1] * 0.4;
+                    z += ejectVelocities[i * 3 + 2] * 0.4;
+                    posAttr.setXYZ(i, x, y, z);
+                }
+                posAttr.needsUpdate = true;
+                // 渐隐：从5秒开始opacity渐减到0
+                if (ejectTimer > 300) { // 5秒后开始渐隐，10秒结束
+                    const fadeProgress = (ejectTimer - 300) / 300; // 0到1
+                    ejectMaterial.opacity = Math.max(0, 1 - fadeProgress);
+                    ejectMaterial.needsUpdate = true;
+                }
+                if (ejectTimer > 600) { // 10秒 ~60fps*10=600帧
+                    scene.remove(ejectParticles);
+                    ejectParticles.geometry.dispose();
+                    ejectParticles.material.dispose();
+                    ejectAnimationActive = false;
+                }
+            }
+            // 更新黑洞过渡
+            if (blackHoleTransitionActive) {
+                const elapsed = (Date.now() - blackHoleTransitionStartTime) / 1000; // 秒
+                let progress = elapsed / 1; // 1秒过渡
+                if (progress > 1) progress = 1;
+                const currentRadius = blackHoleRadius + (targetBlackHoleRadius - blackHoleRadius) * progress;
+                blackHole.scale.set(currentRadius / 4, currentRadius / 4, currentRadius / 4);
+                if (progress >= 1) {
+                    blackHoleRadius = targetBlackHoleRadius;
+                    blackHoleTransitionActive = false;
+                }
+            }
+            // 更新光环过渡
+            if (ringTransitionActive) {
+                const elapsed = (Date.now() - ringTransitionStartTime) / 1000;
+                let progress = elapsed / 1;
+                if (progress > 1) progress = 1;
+                const currentInner = innerRingRadius + (targetInnerRingRadius - innerRingRadius) * progress;
+                const currentOuter = outerRingRadius + (targetOuterRingRadius - outerRingRadius) * progress;
+                accretionDisk.geometry.dispose();
+                accretionDisk.geometry = new THREE.RingGeometry(currentInner, currentOuter, 64);
+                if (progress >= 1) {
+                    innerRingRadius = targetInnerRingRadius;
+                    outerRingRadius = targetOuterRingRadius;
+                    ringTransitionActive = false;
+                }
+            }
+            // 更新环绕粒子半径过渡（旋转始终执行）- 修复：统一计算progress，所有粒子渐变
+            const orbitPosAttr = orbitGeometry.getAttribute('position');
+            if (orbitTransitionActive) {
+                const elapsed = (Date.now() - orbitTransitionStartTime) / 1000;
+                let progress = elapsed / 1;
+                if (progress > 1) progress = 1;
+                for (let i = 0; i < orbitCount; i++) {
+                    let currentR = orbitRadii[i] + (targetOrbitRadii[i] - orbitRadii[i]) * progress;
+                    orbitAngles[i] += 0.01 / currentR; // 始终旋转，使用当前半径计算角速度
+                    orbitPosAttr.setXYZ(i,
+                        currentR * Math.cos(orbitAngles[i]),
+                        0,
+                        currentR * Math.sin(orbitAngles[i])
+                    );
+                    if (progress >= 1) {
+                        orbitRadii[i] = targetOrbitRadii[i];
+                    }
+                }
+                if (progress >= 1) {
+                    orbitTransitionActive = false;
+                }
+            } else {
+                // 无过渡时，正常旋转
+                for (let i = 0; i < orbitCount; i++) {
+                    const currentR = orbitRadii[i];
+                    orbitAngles[i] += 0.01 / currentR;
+                    orbitPosAttr.setXYZ(i,
+                        currentR * Math.cos(orbitAngles[i]),
+                        0,
+                        currentR * Math.sin(orbitAngles[i])
+                    );
+                }
+            }
+            orbitPosAttr.needsUpdate = true;
+            // 更新成长动画（10秒渐隐）
+            if (growthAnimationActive) {
+                growthTimer++;
+                const posAttr = growthParticles.geometry.getAttribute('position');
+                for (let i = 0; i < growthCount; i++) { // 使用当前growthCount
+                    let x = posAttr.getX(i);
+                    let y = posAttr.getY(i);
+                    let z = posAttr.getZ(i);
+                    x += growthVelocities[i * 3] * 0.3; // 更快速度
+                    y += growthVelocities[i * 3 + 1] * 0.3;
+                    z += growthVelocities[i * 3 + 2] * 0.3;
+                    posAttr.setXYZ(i, x, y, z);
+                    // 更新位置数组用于推动
+                    growthPositionsArray[i].set(x, y, z);
+                }
+                posAttr.needsUpdate = true;
+                // 渐隐：从5秒开始opacity渐减到0
+                if (growthTimer > 300) { // 5秒后开始渐隐，10秒结束
+                    const fadeProgress = (growthTimer - 300) / 300; // 0到1
+                    growthMaterial.opacity = Math.max(0, 1 - fadeProgress);
+                    growthMaterial.needsUpdate = true;
+                }
+                if (growthTimer > 600) { // 10秒 ~60fps*10=600帧
+                    scene.remove(growthParticles);
+                    growthParticles.geometry.dispose();
+                    growthParticles.material.dispose();
+                    growthAnimationActive = false;
+                    growthPositionsArray = [];
+                }
+            }
+            // 更新吸引粒子（平衡随机移动和向心吸引，加快速度）
+            const posAttr = particles.getAttribute('position');
+            const colorAttr = particles.getAttribute('color');
+            const sizeAttr = particles.getAttribute('size');
+            pushFrameCounter++;
+            for (let i = 0; i < particleCount; i++) {
+                let x = posAttr.getX(i);
+                let y = posAttr.getY(i);
+                let z = posAttr.getZ(i);
+                let dist = Math.sqrt(x * x + y * y + z * z);
+               
+                if (dist > 0.1) {
+                    // 适中向心引力（保持0.1，但用gravityStrength）
+                    let accel = gravityStrength / (dist * dist + 0.001);
+                    // 新增：如果粒子是红色（dist < 20），加强向心引力
+                    if (dist < 20) {
+                        accel *= 2.0; // 加强2倍向心力
+                    }
+                    velocities[i * 3] -= (x / dist) * accel;
+                    velocities[i * 3 + 1] -= (y / dist) * accel;
+                    velocities[i * 3 + 2] -= (z / dist) * accel;
+                    // 白色粒子推动（增强：每5帧执行一次，pushForce增加到1.0，采样步长2）
+                    if (growthAnimationActive && growthTimer < 300 && pushFrameCounter % 5 === 0) {
+                        let pushX = 0, pushY = 0, pushZ = 0;
+                        let pushCount = 0;
+                        for (let j = 0; j < growthPositionsArray.length; j += 2) { // 采样每2个，增加采样
+                            const whitePos = growthPositionsArray[j];
+                            const dx = x - whitePos.x;
+                            const dy = y - whitePos.y;
+                            const dz = z - whitePos.z;
+                            const pushDist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                            if (pushDist < 5 && pushDist > 0.1) { // 近距离推动
+                                const pushForceVal = pushForce / (pushDist * pushDist); // 使用当前pushForce
+                                pushX += (dx / pushDist) * pushForceVal;
+                                pushY += (dy / pushDist) * pushForceVal;
+                                pushZ += (dz / pushDist) * pushForceVal;
+                                pushCount++;
+                            }
+                        }
+                        if (pushCount > 0) {
+                            velocities[i * 3] += pushX / pushCount;
+                            velocities[i * 3 + 1] += pushY / pushCount;
+                            velocities[i * 3 + 2] += pushZ / pushCount;
+                        }
+                    }
+                    // 加强随机扰动（加快移动）
+                    velocities[i * 3] += (Math.random() - 0.5) * 0.003;
+                    velocities[i * 3 + 1] += (Math.random() - 0.5) * 0.003;
+                    velocities[i * 3 + 2] += (Math.random() - 0.5) * 0.003;
+                    // 轻微摩擦（减弱到0.997，加快整体速度）
+                    velocities[i * 3] *= 0.997;
+                    velocities[i * 3 + 1] *= 0.997;
+                    velocities[i * 3 + 2] *= 0.997;
+                    // 更新位置（轻微加快步长）
+                    x += velocities[i * 3] * 1.2;
+                    y += velocities[i * 3 + 1] * 1.2;
+                    z += velocities[i * 3 + 2] * 1.2;
+                    // 重新计算dist以防反弹，并轻微修正位置不超过界限
+                    dist = Math.sqrt(x * x + y * y + z * z);
+                    // 新增：吸积盘碰撞效果（粒子穿越盘面时被捕获，加入环绕系统）
+                    // 对于红色粒子（dist < 20），降低碰撞概率到50%
+                    const cylR = Math.sqrt(x * x + z * z);
+                    let isRed = dist < 20;
+                    if (Math.abs(y) < 2 && cylR > blackHoleRadius + 1 && cylR < blackHoleRadius + 20) {
+                        if (!isRed || Math.random() > 0.5) { // 红色粒子只50%概率触发
+                            addToOrbit(); // 加入一个环绕粒子
+                            absorbedSinceLastUpgrade++; // 计入吸收计数，促进成长
+                            absorbedCount++;
+                            if (absorbedSinceLastUpgrade >= currentTarget) {
+                                growBlackHole();
+                                absorbedSinceLastUpgrade = 0;
+                                currentTarget *= 2; // 下次目标*2
+                            }
+                            // 重置粒子到外围（模拟捕获后剩余碎片）
+                            const radius = 80 + Math.random() * 150;
+                            const theta = Math.random() * Math.PI * 2;
+                            const phi = Math.acos(2 * Math.random() - 1);
+                            x = radius * Math.sin(phi) * Math.cos(theta);
+                            y = radius * Math.sin(phi) * Math.sin(theta);
+                            z = radius * Math.cos(phi);
+                            velocities[i * 3] = (Math.random() - 0.5) * 0.45;
+                            velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.45;
+                            velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.45;
+                            const color = new THREE.Color().setHSL(0.6, 0.8, 0.5 + Math.random() * 0.3);
+                            colorAttr.setXYZ(i, color.r, color.g, color.b);
+                            sizeAttr.setX(i, 0.3 + Math.random() * 0.4);
+                        }
+                    }
+                    if (dist > 200) { // 如果走远，重置
+                        const radius = 80 + Math.random() * 150;
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.acos(2 * Math.random() - 1);
+                        x = radius * Math.sin(phi) * Math.cos(theta);
+                        y = radius * Math.sin(phi) * Math.sin(theta);
+                        z = radius * Math.cos(phi);
+                        velocities[i * 3] = (Math.random() - 0.5) * 0.45;
+                        velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.45;
+                        velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.45;
+                    }
+                    posAttr.setXYZ(i, x, y, z);
+                    // 接近时红移
+                    if (dist < 20) {
+                        const factor = (20 - dist) / 20;
+                        colorAttr.setXYZ(i, 1.0, 0.2 * factor, 0.0);
+                        sizeAttr.setX(i, sizes[i] * (1 + factor * 2));
+                    }
+                    // 吸收（用blackHoleRadius作为阈值）
+                    if (dist < blackHoleRadius) {
+                        absorbedSinceLastUpgrade++;
+                        absorbedCount++;
+                        if (absorbedSinceLastUpgrade >= currentTarget) {
+                            growBlackHole();
+                            absorbedSinceLastUpgrade = 0;
+                            currentTarget *= 2; // 下次目标*2
+                        }
+                        // 重置到外围
+                        const radius = 80 + Math.random() * 150;
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.acos(2 * Math.random() - 1);
+                        posAttr.setXYZ(i,
+                            radius * Math.sin(phi) * Math.cos(theta),
+                            radius * Math.sin(phi) * Math.sin(theta),
+                            radius * Math.cos(phi)
+                        );
+                        velocities[i * 3] = (Math.random() - 0.5) * 0.45;
+                        velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.45;
+                        velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.45;
+                        const color = new THREE.Color().setHSL(0.6, 0.8, 0.5 + Math.random() * 0.3);
+                        colorAttr.setXYZ(i, color.r, color.g, color.b);
+                        sizeAttr.setX(i, 0.3 + Math.random() * 0.4);
+                    }
+                }
+            }
+            posAttr.needsUpdate = true;
+            colorAttr.needsUpdate = true;
+            sizeAttr.needsUpdate = true;
+            // 吸积盘旋转
+            accretionDisk.rotation.z += 0.005;
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+        // 窗口大小调整
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
