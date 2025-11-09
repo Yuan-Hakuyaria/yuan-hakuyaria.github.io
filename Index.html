@@ -739,12 +739,12 @@
                 }
                 posAttr.needsUpdate = true;
                 // 渐隐：从5秒开始opacity渐减到0
-                if (ejectTimer > 300) { // 5秒后开始渐隐，10秒结束
+                if (ejectTimer > 600) { // 10秒后开始渐隐，15秒结束
                     const fadeProgress = (ejectTimer - 300) / 300; // 0到1
                     ejectMaterial.opacity = Math.max(0, 1 - fadeProgress);
                     ejectMaterial.needsUpdate = true;
                 }
-                if (ejectTimer > 600) { // 10秒 ~60fps*10=600帧
+                if (ejectTimer > 900) { // 15秒 ~60fps*20=1200帧
                     scene.remove(ejectParticles);
                     ejectParticles.geometry.dispose();
                     ejectParticles.material.dispose();
