@@ -168,7 +168,7 @@
                 </div>
                 <div class="form-group">
                     <label for="pushForce">白色粒子推力 (默认1):</label>
-	   <label for="growthNum">* 数值大性能不好的设备容易卡死</label>
+   <label for="growthNum">* 数值大性能不好的设备容易卡死</label>
                     <input type="number" id="pushForce" placeholder="1" min="0" step="1">
                 </div>
                 <div class="form-group">
@@ -196,7 +196,7 @@
                     <li>当吸收足够粒子后，黑洞会成长，增加大小和引力，伴随白色粒子爆发效果。</li>
                     <li>环绕粒子模拟吸积盘，当吸积盘上粒子数量过多时密集时会甩飞部分粒子，防止设备卡死。</li>
                     <li>配置按钮可调整游戏参数，如成长增量、初始粒子数等。</li>
-	   <li>温馨提示：电脑版体验更佳。</li>
+   <li>温馨提示：电脑版体验更佳。</li>
                 </ul>
                 <h3>作者信息</h3>
                 <p>作者：Yuan<br>程序员：Grok 5<br>其实这个网站是来测试 Grok 的代码编写能力的，我花了几个小时的成果就是这样子的</p>
@@ -217,7 +217,6 @@
             pushForce: 1,
             growthNum: 200
         };
-
         // 自定义粒子数量（可修改）
         let initialParticleCount = config.initialParticleCount;
         const clickParticleCount = 5; // 每次点击生成粒子数
@@ -663,6 +662,46 @@
         function closeConfig() {
             document.getElementById('configPanel').style.display = 'none';
         }
+        function resetBlackHole() {
+            blackHoleRadius = 4;
+            targetBlackHoleRadius = 4;
+            blackHole.scale.set(1, 1, 1);
+            gravityStrength = 0.1;
+            innerRingRadius = 5;
+            outerRingRadius = 24;
+            targetInnerRingRadius = 5;
+            targetOuterRingRadius = 24;
+            accretionDisk.geometry.dispose();
+            accretionDisk.geometry = new THREE.RingGeometry(5, 24, 64);
+            // Reset orbits
+            orbitCount = 2000;
+            orbitPositions = new Float32Array(orbitCount * 3);
+            orbitAngles = new Float32Array(orbitCount);
+            orbitRadii = new Float32Array(orbitCount);
+            targetOrbitRadii = new Float32Array(orbitCount);
+            orbitColors = new Float32Array(orbitCount * 3);
+            for (let i = 0; i < orbitCount; i++) {
+                const radius = blackHoleRadius + 5 + Math.random() * 15;
+                const theta = Math.random() * Math.PI * 2;
+                orbitRadii[i] = radius;
+                targetOrbitRadii[i] = radius;
+                orbitAngles[i] = theta;
+                orbitPositions[i * 3] = radius * Math.cos(theta);
+                orbitPositions[i * 3 + 1] = 0;
+                orbitPositions[i * 3 + 2] = radius * Math.sin(theta);
+                const color = new THREE.Color().setHSL(0.1, 0.8, 0.5 + Math.random() * 0.3);
+                orbitColors[i * 3] = color.r;
+                orbitColors[i * 3 + 1] = color.g;
+                orbitColors[i * 3 + 2] = color.b;
+            }
+            orbitGeometry.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+            orbitGeometry.setAttribute('color', new THREE.BufferAttribute(orbitColors, 3));
+            orbitSystem.geometry.attributes.position.needsUpdate = true;
+            orbitSystem.geometry.attributes.color.needsUpdate = true;
+            orbitTransitionActive = false;
+            ringTransitionActive = false;
+            blackHoleTransitionActive = false;
+        }
         function applyConfig() {
             const growthSize = parseInt(document.getElementById('growthSize').value) || config.growthSize;
             const gravityInc = parseInt(document.getElementById('gravityInc').value) || config.gravityInc;
@@ -688,7 +727,8 @@
             absorbedSinceLastUpgrade = 0;
             currentTarget = 10;
             absorbedCount = 0;
-            gravityStrength = 0.1;
+            // 重置黑洞
+            resetBlackHole();
             closeConfig();
             alert('配置已应用并重新加载粒子！');
         }
@@ -739,12 +779,12 @@
                 }
                 posAttr.needsUpdate = true;
                 // 渐隐：从5秒开始opacity渐减到0
-                if (ejectTimer > 600) { // 10秒后开始渐隐，15秒结束
+                if (ejectTimer > 300) { // 5秒后开始渐隐，10秒结束
                     const fadeProgress = (ejectTimer - 300) / 300; // 0到1
                     ejectMaterial.opacity = Math.max(0, 1 - fadeProgress);
                     ejectMaterial.needsUpdate = true;
                 }
-                if (ejectTimer > 900) { // 15秒 ~60fps*20=1200帧
+                if (ejectTimer > 600) { // 10秒 ~60fps*10=600帧
                     scene.remove(ejectParticles);
                     ejectParticles.geometry.dispose();
                     ejectParticles.material.dispose();
